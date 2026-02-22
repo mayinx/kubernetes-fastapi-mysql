@@ -2,14 +2,14 @@
 
 - Create a Deployment with 3 pods (i.e replicas)
     - Each pod containing
-        - 1 MySQL container
-        - 1 FastAPI Container
+        - 1 MySQL container (image-ref:  datascientest/mysql-k8s:1.0.0.)
+        - 1 API Container (FastAPI)
 - Create a Service and an Ingress to enable access to the API
 
 - Enable communication between the API + the Database:
     - Complete the code provided for the API
     - Rebuild the corresponding Docker image (+ upload it to DockerHub) 
-    - Change the API code to retrieve the database password (atascientest1234) - this password cannot be hard-coded and must therefore be put in a Secret 
+    - Change the API code to retrieve the database password (`datascientest1234`) - this password cannot be hard-coded and must therefore be put in a Secret 
 
 ## Deliverables:
 

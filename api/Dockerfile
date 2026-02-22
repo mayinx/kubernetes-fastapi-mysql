@@ -9,6 +9,7 @@ ADD requirements.txt main.py ./
 RUN apt update && apt install python3-pip libmysqlclient-dev -y && pip install -r requirements.txt
 
 # Document that the service listens on port 8000 (does not publish it by itself)
+# (port 8000 is a common default for FastAPI/uvicorn examples)
 EXPOSE 8000
 
 # Default startup: run FastAPI via uvicorn on all interfaces, port 8000

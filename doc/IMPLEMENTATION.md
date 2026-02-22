@@ -90,6 +90,7 @@ ADD requirements.txt main.py ./
 RUN apt update && apt install python3-pip libmysqlclient-dev -y && pip install -r requirements.txt
 
 # Document that the service listens on port 8000 (does not publish it by itself)
+# (port 8000 is a common default for FastAPI/uvicorn examples)
 EXPOSE 8000
 
 # Default startup: run FastAPI via uvicorn on all interfaces, port 8000
@@ -139,7 +140,7 @@ docker build -t mayinx/fastapi-mysql-k8s:1.0.0 ./api
 
 ---
 
-## 4. Local verification (proof the image exists + runs)
+## 4. Local verification (proof the image exists + runs + the api is available)
 
 ### 4.1 Confirm the image exists locally
 List images filtered by repository name:
@@ -157,7 +158,7 @@ mayinx/fastapi-mysql-k8s:1.0.0   e4811b1e6bcb        774MB          202MB
 
 ---
 
-### 4.2 Inspect image metadata (deep inspection)
+### 4.2 Optional: Inspect image metadata (deep inspection)
 ```bash
 docker inspect mayinx/fastapi-mysql-k8s:1.0.0
 ```
@@ -180,7 +181,7 @@ Should give us (among others):
 docker run --rm -p 8000:8000 mayinx/fastapi-mysql-k8s:1.0.0
 ```
 
-Expected logs include a line like “Uvicorn running on ...:8000”:
+Expected logs include a line like “`Uvicorn running on ...:8000`”:
 
 ```bash
 ...$ docker run --rm -p 8000:8000 mayinx/fastapi-mysql-k8s:1.0.0
@@ -194,7 +195,9 @@ INFO:     172.17.0.1:60070 - "GET /favicon.ico HTTP/1.1" 404 Not Found
 
 ---
 
-### 4.5 New terminal: curl proof against `/status`
+### 4.5 Check api-endpoints `/status` + `/docs` 
+
+#### New terminal: curl proof against `/status`
 While the container is still running, open a second terminal:
 
 ```bash
@@ -204,6 +207,225 @@ curl -s http://localhost:8000/status; echo
 
 If we receive "1", we have proof that our container is running and the FastAPI server inside it is responding successfully on port 8000.
 
+
+#### Check `/status` + `/docs`in browser 
+
+- http://localhost:8000/status  => should render "1"
+- http://localhost:8000/docs    => should open the User API Docs / Swagger UI 
+
 ---
+
+## 5. Local integration test (API ↔ MySQL) with 2 Docker Compose services (before Kubernetes)
+
+- The `/status` endpoint works locally, but `/users` fails, since it requires a running MySQL database.
+- Before we introduce Kubernetes manifests, we use Docker Compose to perform a short local integration test to prove that:
+  - the API can connect to MySQL
+  - credentials are correct
+  - the expected database/table exists (`Main.Users`)
+
+- Goal: Limit the later Kubernetes debugging (hopefully) to “manifests and wiring” - instead of “manifests + broken app”.
+
+---
+
+### 5.1 Make DB connection settings environment-driven (K8s-friendly)
+
+#### Settings requirements
+- **Kubernetes**: In Kubernetes, MySQL and the API will run in the same Pod, so the API will reach MySQL via `127.0.0.1:3306`.  
+  - `3306` is the default TCP port for MySQL. Unless explicitly reconfigured, MySQL listens on port `3306` inside the container.
+  
+- **Docker Compose**: In Docker Compose, MySQL and the API will be implemented as separate services (`api` + `db`) that run in separate containers, so the API will reach MySQL via the Compose service name `db:3306`.
+
+#### Create a shared `.env`-file (local only)
+
+To support both setups (Compose now, Kubernetes later), we keep connection settings in environment variables stored in a local `.env` file. 
+
+Example with redacted secrets:
+
+
+```bash
+# .env — shared env for local API↔DB integration test (LOCAL ONLY; do not commit)
+MYSQL_HOST=db
+MYSQL_PORT=3306
+MYSQL_USER=<set-locally>
+MYSQL_PASSWORD=<set-locally>
+MYSQL_DATABASE=Main
+```
+
+> **Important:** Do NOT commit `.env` (with real local values). Add `.env` to `.gitignore`.
+
+Reasoning: Keeping local configuration in an `.env` file allows us to: 
+- Run the same app locally (Compose) and later in Kubernetes (via env vars / Secrets),
+- Avoid hardcoding credentials in code,
+- Avoid committing secrets to git.
+
+
+**Import config in `api/main.py`:**  
+We use the `os`-lib to import the env-vars:
+
+~~~python
+import os
+
+# creating a connection to the database
+mysql_host = os.getenv("MYSQL_HOST", "127.0.0.1")
+mysql_port = os.getenv("MYSQL_PORT", "3306")
+mysql_url = f"{mysql_host}:{mysql_port}"
+
+mysql_user = os.getenv("MYSQL_USER", "") # provided via Secret / env only
+mysql_password = os.getenv("MYSQL_PASSWORD", "") # provided via Secret / env only
+database_name = os.getenv("MYSQL_DATABASE", "Main")
+~~~
+
+
+---
+
+### 5.2 Create a temporary Docker Compose file (2 services)
+
+Create `compose.yml` in the repo root, which functions as temporarty helper for local proof:
+
+~~~yaml
+# compose.yaml 
+
+# Utilized for local integration test (API ↔ MySQL) before Kubernetes implementation
+# Purpose: prove DB connectivity + env-var wiring locally, so Kubernetes 
+# debugging later stays focused on manifests.
+
+services:
+  # ---------------------------------------------------------------------------
+  # db — MySQL database (exsiting image) | provides Main.Users for the API
+  # ---------------------------------------------------------------------------
+  db:
+    # Use the predefined MySQL image 
+    image: datascientest/mysql-k8s:1.0.0
+
+    environment:
+      # MySQL INIT expects MYSQL_ROOT_PASSWORD; we map it from our shared MYSQL_PASSWORD
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+
+     # Optional: expose DB to the host for debugging (the API can reach db:3306 without this)
+    ports:
+      - "3306:3306"
+
+  # ---------------------------------------------------------------------------
+  # api — FastAPI service (builds locally) | connects to db via db:3306
+  # ---------------------------------------------------------------------------
+  api:
+    # Build the API image from ./api (Dockerfile + main.py + requirements.txt)
+    build:
+      context: ./api
+
+    # Tag the built image USING THE same reference we’ll later push + use in Kubernetes  
+    image: mayinx/fastapi-mysql-k8s:1.0.0
+
+    # Load shared local env vars (NOT committed; real values live in .env)
+    # (e.g. MYSQL_HOST=db, MYSQL_PORT=3306, credentials)
+    env_file:
+      - .env
+
+    # Expose API to the host so we can test via curl/browser at localhost:8000
+    ports:
+      - "8000:8000"
+
+    # Start db first (note: this does not guarantee db is "ready", only started)  
+    depends_on: 
+    - db
+~~~
+
+**Notes:**
+- MySQL runs as container `db` on `3306` (the default TCP port for MySQL).
+- The API container can reach it by DNS name `db` inside the Compose network. 
+- The FastAPI server is served by uvicorn and is configured to listen on container port `8000` (see Dockerfile: `EXPOSE 8000` + `uvicorn ... --port 8000`); port 8000 is a common default for FastAPI/uvicorn examples.
+- In Compose, `ports: - "8000:8000"` maps "host port 8000" to "container port 8000", so we can call `http://localhost:8000/status|users` 
+- We inject the config vars (incl. password) via env var to mimic the later Kubernetes Secret approach and keep secrets out of the `main.py` right from the start  
+
+---
+
+### 5.3 Run the local integration test
+
+Start both services (build API image as needed):
+
+~~~bash
+docker compose -p k8s up --build
+~~~
+
+Open a browser and/or a second terminal and test the api-endpoints:
+
+~~~bash
+curl -s http://localhost:8000/status; echo
+# => 1
+
+curl -s http://localhost:8000/users | jq
+# => [
+#      {
+#        "user_id": 1,
+#        "username": "August",
+#        "email": "..."
+#      },
+#      {
+#       "user_id": 2,
+#       "username": "Linda",
+#       "email": "eleifend.Cras.sed@cursusnonegestas.com"
+#      },
+#      ...
+#    ]
+
+curl -s http://localhost:8000/users/1 | jq
+# => {
+#      "user_id": 1,
+#      "username": "August",
+#      "email": "..."
+#    }
+~~~
+
+**Notes**
+- If `/users` fails immediately after startup, MySQL may not be ready yet. Wait ~10–30 seconds and retry.
+- `/users` should return a JSON list of users if the DB is initialized as expected by the provided MySQL image.
+
+Stop and clean up:
+
+~~~bash
+docker compose down
+~~~
+
+---
+
+
+### 5.4 Fix `/users` and `/users/{id}` im `main.py` (SQLAlchemy 2.0 + FastAPI path syntax)
+
+Due to some issues with the provided `main.py`, only accessing the `/status`-endpoint works as expected, but `/users` and `users/{id}` return **500** with:
+
+- `sqlalchemy.exc.ObjectNotExecutableError: Not an executable object: 'SELECT * FROM Users;'`
+
+**Cause (SQLAlchemy 2.0):** The original lesson code uses 
+
+```python
+connection.execute("SELECT ...") 
+```
+with a plain SQL string. In SQLAlchemy 2.0, plain strings are no longer executable statements.
+
+**Fix (minimal):** Replace `connection.execute("...")` with `connection.exec_driver_sql("...")` for raw SQL strings:
+
+```python
+connection.exec_driver_sql("SELECT ...") 
+```
+
+Additionally, the lesson uses an invalid FastAPI route pattern:
+
+```python
+# 'user_id:int' is not supported in FastAPI path strings
+@server.get('/users/{user_id:int}', response_model=User) 
+async def get_user(user_id):
+  # ...
+```
+
+**Fix:** Use `'/users/{user_id}'` and type the parameter in the function signature (`user_id: int`):
+
+
+```python
+@server.get('/users/{user_id}', response_model=User)
+async def get_user(user_id: int):
+```
+
+> Implementation reference: see the **NOTE** blocks in `api/main.py` above the `/users` and `/users/{user_id}` endpoints (documenting the exact change and why it was needed).
+
 
 

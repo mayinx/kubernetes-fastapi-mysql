@@ -1,0 +1,45 @@
+# compose.yaml 
+
+# Utilized for local integration test (API ↔ MySQL) before Kubernetes implementation
+# Purpose: prove DB connectivity + env-var wiring locally, so Kubernetes 
+# debugging later stays focused on manifests.
+
+services:
+  # ---------------------------------------------------------------------------
+  # db — MySQL database (exsiting image) | provides Main.Users for the API
+  # ---------------------------------------------------------------------------
+  db:
+    # Use the predefined MySQL image 
+    image: datascientest/mysql-k8s:1.0.0
+
+    environment:
+      # MySQL INIT expects MYSQL_ROOT_PASSWORD; we map it from our shared MYSQL_PASSWORD
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+
+     # Optional: expose DB to the host for debugging (the API can reach db:3306 without this)
+    ports:
+      - "3306:3306"
+
+  # ---------------------------------------------------------------------------
+  # api — FastAPI service (builds locally) | connects to db via db:3306
+  # ---------------------------------------------------------------------------
+  api:
+    # Build the API image from ./api (Dockerfile + main.py + requirements.txt)
+    build:
+      context: ./api
+
+    # Tag the built image USING THE same reference we’ll later push + use in Kubernetes  
+    image: mayinx/fastapi-mysql-k8s:1.0.0
+
+    # Load shared local env vars (NOT committed; real values live in .env)
+    # (e.g. MYSQL_HOST=db, MYSQL_PORT=3306, credentials)
+    env_file:
+      - .env
+
+    # Expose API to the host so we can test via curl/browser at localhost:8000
+    ports:
+      - "8000:8000"
+
+    # Start db first (note: this does not guarantee db is "ready", only started)  
+    depends_on: 
+    - db
