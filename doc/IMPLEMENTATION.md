@@ -341,13 +341,13 @@ services:
 
 ### 5.3 Run the local integration test
 
-Start both services (build API image as needed):
+#### Start both services (build API image as needed):
 
 ~~~bash
 docker compose -p k8s up --build
 ~~~
 
-Open a browser and/or a second terminal and test the api-endpoints:
+#### Open a browser and/or a second terminal and test the api-endpoints:
 
 ~~~bash
 curl -s http://localhost:8000/status; echo
@@ -377,17 +377,17 @@ curl -s http://localhost:8000/users/1 | jq
 ~~~
 
 **Notes**
-- If `/users` fails immediately after startup, MySQL may not be ready yet. Wait ~10–30 seconds and retry.
-- `/users` should return a JSON list of users if the DB is initialized as expected by the provided MySQL image.
+- `/users` should return a JSON list of users and `users/:id` a single user if the DB is initialized as expected by the provided MySQL image. 
+- I the db-related api-endpoints fail with a 500, check the fix in the following chapter first (see. 5.4)
+-  
 
-Stop and clean up:
+#### Stop and clean up:
 
 ~~~bash
-docker compose down
+docker compose -p k8s down
 ~~~
 
 ---
-
 
 ### 5.4 Fix `/users` and `/users/{id}` im `main.py` (SQLAlchemy 2.0 + FastAPI path syntax)
 
@@ -428,4 +428,50 @@ async def get_user(user_id: int):
 > Implementation reference: see the **NOTE** blocks in `api/main.py` above the `/users` and `/users/{user_id}` endpoints (documenting the exact change and why it was needed).
 
 
+## 6. Publish the API image to Docker Hub (so Kubernetes can pull it)
+
+Since the local integration test work (`/status`, `/users`, `/users/{id}`), we can now publish the API image to Docker Hub. Kubernetes nodes will later pull this image using the same image reference we tag locally.
+
+---
+
+### 6.1 Verify the image reference (local)
+
+~~~bash
+docker images "mayinx/fastapi-mysql-k8s"
+# expect: mayinx/fastapi-mysql-k8s:1.0.0
+~~~
+
+---
+
+### 6.2 Login to Docker Hub (one-time per machine/session)
+
+~~~bash
+docker login
+~~~
+
+If login succeeds, Docker stores a credential token locally so you can push.
+
+---
+
+### 6.3 Push the image
+
+~~~bash
+docker push mayinx/fastapi-mysql-k8s:1.0.0
+~~~
+
+Expected: Docker uploads layers (only what’s missing on Docker Hub).
+
+---
+
+### 6.4 Optional sanity check: pull from Docker Hub (proves it’s published)
+
+~~~bash
+docker pull mayinx/fastapi-mysql-k8s:1.0.0
+~~~
+
+If this succeeds, we have proof that:
+- the image exists remotely on Docker Hub
+- Kubernetes will be able to pull it later using the same reference
+
+---
 
