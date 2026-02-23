@@ -18,7 +18,7 @@ kind: Ingress
 metadata:
   name: api-ingress               # Ingress resource name
 spec:
-  ingressClassName: nginx         # Ingress controller to use (adjust if your cluster uses another class)
+  ingressClassName: traefik       # Ingress controller to use ('nginx', 'traefik' etc. - adjust accordingly)
   rules:
     - http:
         paths:

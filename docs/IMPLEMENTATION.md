@@ -1,14 +1,31 @@
 
 
-# docs/IMPLEMENTATION.md — Kubernetes Exam Project (DataScientest) — Implementation Diary
+# Implementation Steps / Log
+
+> ## 👤 About
+> This README contains my personal implementation log (“exam build diary”).  
+> It was written while building the solution to keep milestones, decisions, and commands reproducible.  
+> For the TL;DR command checklist and quick setup guide, see: **[docs/RUNBOOK.md](RUNBOOK.md)**.
 
 ---
 
-## 1. Repo setup (folder structure + naming)
+## 📌 Index (top-level)
+
+1. [Project scaffold (folder structure + naming)](#1--project-scaffold-folder-structure--naming)
+2. [Implementation roadmap](#2-implementation-roadmap)
+3. [Build Local Docker API image](#3-build-local-docker-api-image)
+4. [Local verification](#4-local-verification-proof-the-image-exists--runs--the-api-is-available)
+5. [Local integration test (Docker Compose)](#5-local-integration-test-api--mysql-with-2-docker-compose-services-before-kubernetes)
+6. [Publish the API image to Docker Hub](#6-publish-the-api-image-to-docker-hub-so-kubernetes-can-pull-it)
+7. [Kubernetes manifests (YAML files)](#7-kubernetes-manifests---create-the-required-yaml-files)
+8. [Apply + verify end-to-end](#8-apply-manifests-and-verify-end-to-end-secret--deployment--service--ingress)
+---
+
+## 1.  Project scaffold (folder structure + naming)
 
 ### 1.1 Target folder structure 
 
-We create the following initial structure in our repo root, keeping anything api-related together to have a clean build context fro Docker:  
+We create the following initial structure in our repo root, keeping anything api-related together to have a clean build context for Docker:  
 
 ```text
 .
@@ -21,7 +38,7 @@ We create the following initial structure in our repo root, keeping anything api
 ├── my-deployment-eval.yml
 ├── my-ingress-eval.yml 
 ├── my-secret-eval.yml
-├──  my-service-eval.yml
+├── my-service-eval.yml
 └── README.md
 ```
 
@@ -684,13 +701,21 @@ Finally, to allow external access, we create an Ingress named **`api-ingress`** 
 > #### Ingress (The Gatekeeper / The Entrance)
 > A Kubernetes **Ingress** is an object that manages external access to the Services in a cluster.
 > I provides the HTTP entry point for traffic coming from outside the cluster and routes external requests (by host and/or path) to the corresponding Service inside the cluster. So Ingress routes to Services, and Services forward to the Pods behind them.  
-> Ingress requires an Ingress Controller to be installed in the cluster, e.g. NGINX Ingress.
+> Ingress requires an Ingress Controller to be installed in the cluster (e.g. Traefik, NGINX Ingress).
 
 **How it wires to other components:**
 - Routes requests to the Service from `my-service-eval.yml` (`api-svc`) on port  `8000`.
 
 **Key configs that must match / may need adjustment:**
-- `ingressClassName` must match the Ingress Controller available in the cluster (often `nginx`).
+- `ingressClassName` must match the Ingress Controller available in the cluster (often `nginx`, or `traefik` (very common on k3s)) - that means: **Before setting `ingressClassName`, ALWAYS check which IngressClass exists on the cluster** using `kubectl get ingressclass`:
+  ~~~bash
+  kubectl get ingressclass
+  NAME      CONTROLLER                      PARAMETERS   AGE
+  traefik   traefik.io/ingress-controller   <none>       10d
+  ~~~
+  - **Then set `spec.ingressClassName` accordingly** ( 
+  - **If `ingressClassName` does not match, the Ingress may exist but routing will fail (often `404`).**
+
 - `backend.service.name` must match `my-service-eval.yml`’s Service name (`api-svc`).
 - `backend.service.port.number` must match the Service port (`8000`).
 
@@ -701,7 +726,7 @@ kind: Ingress
 metadata:
   name: api-ingress               # Ingress resource name
 spec:
-  ingressClassName: nginx         # Ingress controller to use (adjust if your cluster uses another class)
+  ingressClassName: traefik       # Ingress controller to use ('nginx', 'traefik' etc. - adjust accordingly)
   rules:
     - http:
         paths:
@@ -716,9 +741,189 @@ spec:
 
 ---
 
-### 7.5 Next: apply and verify
+## 8. Apply manifests and verify end-to-end (Secret → Deployment → Service → Ingress)
 
-In the next step we will:
-- apply all YAMLs (Secret → Deployment → Service → Ingress)
-- verify Pods/replicas and endpoints (`/status`, `/users`, `/users/{id}`)
-- capture proof outputs for submission
+Now the Kubernetes resources can be applied in dependency order to verify:
+- 3 replicas are running
+- the API is reachable through the Ingress
+- `/status`, `/users`, `/users/{id}` work as expected
+
+Applying the Kubernetes resources in dependency order is necessary, so each object exists before something else references it.  
+
+---
+
+### 8.1 Apply the manifests (dependency order)
+
+To apply the Kubernetes resources, we use `kubectl apply`. It creates or updates the objects defined in a YAML file and reconciles them with the cluster (“apply this desired state”) - schema
+
+~~~bash
+$ kubectl apply -f <file> 
+~~~ 
+
+~~~bash
+# Apply Secret first (the Deployment references it via secretKeyRef for DB init + API password)
+$ kubectl apply -f my-secret-eval.yml
+secret/mysql-secret created
+
+# Apply Deployment next (creates the Pods; Pods need the Secret at startup to set env vars)
+$ kubectl apply -f my-deployment-eval.yml
+deployment.apps/api-mysql created
+
+# Apply Service next (selects the Pods via labels and provides a stable in-cluster endpoint + load-balancing)
+$ kubectl apply -f my-service-eval.yml
+service/api-svc created
+
+# Apply Ingress last (routes external HTTP traffic to the Service; Ingress backend depends on the Service name/port)
+$ kubectl apply -f my-ingress-eval.yml
+ingress.networking.k8s.io/api-ingress configured
+~~~
+
+---
+
+### 8.2 Watch rollout and check Pods/replicas
+
+To verify that the Deployment successfully created the desired number of Pods and that both containers per Pod are ready we run `kubectl rollout status` + `kubectl get pods`:   
+
+- `kubectl rollout status` waits for the Deployment rollout to complete; 
+- `kubectl get pods` shows current Pod states.
+
+~~~bash
+# Wait until the Deployment rollout is complete
+# rollout status = watches progress until the desired state is reached (or times out)
+$ kubectl rollout status deployment/api-mysql
+deployment "api-mysql" successfully rolled out
+
+# List Pods for this Deployment by label
+# -l ... = label selector (only Pods with app=api-mysql)
+# -o wide = include node/IP details (useful for debugging)
+$ kubectl get pods -l app=api-mysql -o wide
+NAME                       READY   STATUS    RESTARTS   AGE   IP            NODE                      
+api-mysql-5655b5fb-6kqxv   2/2     Running   0          17m   10.42.0.130   <NODE>
+api-mysql-5655b5fb-7cspz   2/2     Running   0          17m   10.42.0.131   <NODE>
+api-mysql-5655b5fb-ppmkd   2/2     Running   0          17m   10.42.0.129   <NODE>
+~~~
+
+Expected:
+- 3 Pods in `Running`
+- Ready `2/2` (sidecar - each Pod has 2 containers: `db` + `api`)
+
+---
+
+### 8.3 Check Service and endpoints
+
+To confirm that the Service selects the Pods correctly and has live endpoints, we use `kubectl get svc` + `kubectl get endpoints`. 
+
+Hint: If the Service selector is wrong, `Endpoints` will be empty and Ingress routing will fail. 
+
+~~~bash
+# Show the Service (ClusterIP + exposed port)
+$ kubectl get svc api-svc
+NAME      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+api-svc   ClusterIP   10.43.220.117   <none>        8000/TCP   27m
+
+# Show the resolved backend endpoints behind the Service (should point to the Pods)
+$ kubectl get endpoints api-svc
+NAME      ENDPOINTS                                            AGE
+api-svc   10.42.0.129:8000,10.42.0.130:8000,10.42.0.131:8000   29m
+
+~~~
+
+Expected:
+- `api-svc` exists and has endpoints on `:8000`
+- endpoints list shows 3 addresses (one per Pod) on port `8000`
+
+---
+
+### 8.4 Check Ingress and get the access URL/IP
+
+To inspect the Ingress status and to learn how to reach it (IP/hostname depends on the cluster + Ingress Controller) we use `kubectl get ingress`.  
+
+Hint: If `ADDRESS` stays empty, the controller may not be installed or not exposing an external address.
+and be sure that `CLASS` (== the ingressclassname) is identical with the result of `kubectl get ingressclass`. If those differ, your setup won't work.  
+
+~~~bash
+# Show Ingress rules + the assigned ADDRESS/HOSTS (if provided by the cluster)
+$ kubectl get ingress api-ingress
+NAME          CLASS     HOSTS   ADDRESS          PORTS   AGE
+api-ingress   traefik   *       192.168.178.57   80      6d8h
+~~~
+
+---
+
+### 8.5 Verify API endpoints via Ingress
+
+We test the API through the Ingress entry point to confirm the full chain works: 
+
+**Ingress → Service → Pods**  
+
+~~~bash
+# Replace <INGRESS_IP> with the Ingress ADDRESS from `kubectl get ingress`
+$ curl -i http://<INGRESS_IP>/status; echo
+#=> HTTP/1.1 200 OK
+#   Content-Length: 1
+#   Content-Type: application/json
+#   Date: Mon, 23 Feb 2026 19:28:40 GMT
+#   Server: uvicorn
+#
+#   1
+
+# Pretty-print JSON list of users
+$ curl -s http://<INGRESS_IP>/users | jq
+# => [
+#      {
+#        "user_id": 1,
+#        "username": "August",
+#        "email": "..."
+#      },
+#      {
+#       "user_id": 2,
+#       "username": "Linda",
+#       "email": "eleifend.Cras.sed@cursusnonegestas.com"
+#      },
+#      ...
+#    ]
+
+# Pretty-print one user (id=1)
+$ curl -s http://<INGRESS_IP>/users/1 | jq
+# => {
+#      "user_id": 1,
+#      "username": "August",
+#      "email": "..."
+#    }
+~~~
+
+---
+
+### 8.7 Capture evidence 
+
+Implement a bash-script to create evicence - f.i.: 
+
+- `kubectl get pods -l app=api-mysql -o wide`
+- `kubectl get endpoints api-svc`
+- `kubectl get ingress api-ingress`
+- successful `curl` responses for `/status`, `/users`, `/users/1`
+
+See `scripts/capture-proof.sh` + `evidence/` for details ...  
+
+To run teh script:
+~~~bash
+./scripts/capture-proof.sh
+~~~
+
+Fallback (after port-forward) with a provided `BASE_URL`-env var:
+~~~bash
+BASE_URL=http://localhost:8000 ./scripts/capture-proof.sh
+~~~
+
+Output:
+~~~text
+evidence/<timestamp>/
+  00_meta.txt
+  01_pods.txt
+  02_service.txt
+  03_endpointslice.txt
+  04_ingress.txt
+  05_curl_status.txt
+  06_curl_users.json
+  07_curl_user_1.json
+~~~
