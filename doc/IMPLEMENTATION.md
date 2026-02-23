@@ -475,3 +475,250 @@ If this succeeds, we have proof that:
 
 ---
 
+## 7. Kubernetes manifests - create the required YAML files 
+
+Now that the API image is available on Docker Hub, we can start creating the required Kubernetes manifest files:
+
+- `my-secret-eval.yml`
+- `my-deployment-eval.yml`
+- `my-service-eval.yml`
+- `my-ingress-eval.yml`
+
+We build these in dependency order so each resource can reference what it needs.
+
+> The full contents of the YAML fiels are not all duplicated here - see the corresponding yaml-files themselves for details, which are commented sufficiently. The following focusses on the description of the purpose and wiring of teh various k8s components. 
+
+---
+
+### 7.1 Create the Secret (`my-secret-eval.yml`) — credentials
+
+First we create a **Secret** named **`mysql-secret`** that stores the DB password (`MYSQL_PASSWORD`) so the API can read it from env vars and the password is not hardcoded in `api/main.py`.
+
+**Goal:** store the DB password as a Kubernetes Secret so it is **not hardcoded** in `api/main.py`.
+
+> #### Secret (The Vault / The Configuration)  
+> A **Kubernetes Secret** acts a vault - it is an object designed to store and manage sensitive information — such as passwords, OAuth tokens, and SSH keys—separately from the app code. When a Secret is created, Kubernetes stores it in `etcd` (the cluster's database). From there, the Deployment "injects" the Secret with its sensitive data into the Pod(s) as they start up.  
+
+**Wiring (how it connects to other components):**
+- Referenced by `my-deployment-eval.yml` via `secretKeyRef` for:
+  - **db container**: sets `MYSQL_ROOT_PASSWORD` (MySQL initialization)
+  - **api container**: sets `MYSQL_PASSWORD` (API connection)
+
+**Key configs that must match:**
+- `metadata.name` must match `secretKeyRef.name` in the Deployment.
+- the Secret key (e.g. `MYSQL_PASSWORD`) matches what the API expects via environment variables - and must match `secretKeyRef.key` in the Deployment.
+- We use `stringData` for readability; Kubernetes stores the final value base64-encoded under `data`.
+
+~~~yaml
+# my-secret-eval.yml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret                # Secret name referenced by the Deployment
+type: Opaque                        # Generic key/value secret
+stringData:                         # Human-readable input; Kubernetes stores it base64-encoded in `data`
+  MYSQL_PASSWORD: datascientest1234 # DB password (must NOT be hardcoded in main.py)
+~~~
+
+---
+
+### 7.2 Create the Deployment (`my-deployment-eval.yml`) — 3 Pods, 2 containers per Pod
+
+Now that the Secret is in place, we create a Deployment named **`api-mysql`** with `replicas: 3`. Each Pod runs **two containers** (`db` + `api`), and both containers receive the password from `mysql-secret` (MySQL init + API connection).
+
+**Goal:** one Kubernetes Deployment that creates the required workload:
+- `replicas: 3` 
+- each Pod contains 2 containers (teh so called "sidecar pattern" => two containers in one pod)
+  - `db` container: `datascientest/mysql-k8s:1.0.0`
+  - `api` container: `mayinx/fastapi-mysql-k8s:1.0.0` (pulled from Docker Hub)
+    - The API container is injected with the required  DB password defined in the Secret (injected on API-Pod start).
+
+> #### Deployment (The Manager / The Logic)
+> A **Kubernetes Deployment** is a high-level object that manages the lifecycle of Pods based on a **Pod Template** (blueprint).  
+> Instead of creating Pods directly, a Deployment object is created that ensures the desired number of Pods are running and healthy at all times.
+>
+
+> #### Deployment Key Features
+> A Deployment provides several automated features that make managing containers much easier:  
+> - **Self-healing:** if a Pod dies, the Deployment replaces it.
+> - **Scaling:** manages replicas via a **ReplicaSet**.
+> - **Rollouts / rollbacks:** performs rolling updates (and can revert).
+> - **Pause / resume:** rollout can be paused for verification.
+
+> #### Relation between **Deployment <-> ReplicaSet <-> Pods** 
+> To be precise, a Deployment doesn't manage Pods directly; it manages a **ReplicaSet**, which in turn manages the Pods. 
+> - **Deployment** defines desired state + update strategy (e.g. which image to run).
+> - **ReplicaSet** ensures the exact number of Pod replicas are running 
+> - **Pods** is the actual running instance of the application.
+ 
+**Wiring (how it connects to other components):**
+- Uses `my-secret-eval.yml` for password injection into both containers.
+- Is selected by `my-service-eval.yml` via Pod labels (Service selector → Deployment template labels).
+- Is exposed externally via `my-ingress-eval.yml` → Service → Pods.
+
+**Key configs that must match:**
+- `spec.replicas` must be **3** (requirement).
+- `spec.selector.matchLabels` must exactly match `spec.template.metadata.labels`.
+- The Pod label (e.g. `app: api-mysql`) must match the Service selector.
+- `api` container `image:` must be the pushed Docker Hub reference.
+- API DB wiring must reflect **same-Pod networking** (both containers run in the same Pod, so the API connects to MySQL via `127.0.0.1:3306`)
+  - `MYSQL_HOST=127.0.0.1`
+  - `MYSQL_PORT=3306`
+- `secretKeyRef` name/key must match `my-secret-eval.yml`.
+- Secret mapping must be consistent: 
+  - `MYSQL_ROOT_PASSWORD` for the MySQL container initialization
+  - `MYSQL_PASSWORD` for the API connection
+- Probes use `/status` as a simple health signal (readiness + liveness).
+
+~~~yaml
+# my-deployment-eval.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-mysql                 # Deployment name
+spec:
+  replicas: 3                     # Required: 3 Pods (each Pod contains BOTH containers)
+  selector:
+    matchLabels:
+      app: api-mysql              # Deployment manages Pods with this label
+  template:
+    metadata:
+      labels:
+        app: api-mysql            # Pod label (also used by the Service selector)
+    spec:
+      containers:
+        - name: db
+          image: datascientest/mysql-k8s:1.0.0   # MySQL container image (provided by the exercise)
+          env:
+            # MySQL init expects MYSQL_ROOT_PASSWORD (we source it from the Secret)
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+          ports:
+            - containerPort: 3306                # MySQL listens on 3306 inside the Pod
+
+        - name: api
+          image: mayinx/fastapi-mysql-k8s:1.0.0  # Our pushed FastAPI image (pulled from Docker Hub)
+          env:
+            # Same-Pod networking: the API reaches MySQL via localhost (127.0.0.1) on port 3306
+            - name: MYSQL_HOST
+              value: "127.0.0.1"
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: "root"
+            # API reads password from env (Secret), not from code
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_DATABASE
+              value: "Main"
+          ports:
+            - containerPort: 8000                # FastAPI/uvicorn listens on 8000 inside the Pod
+          readinessProbe:
+            # Ready = endpoint responds -> traffic can be routed to this Pod
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            # Live = endpoint responds -> if it fails, K8s restarts the container
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+~~~
+
+---
+
+### 7.3 Create the Service (`my-service-eval.yml`)
+
+Since Pods are ephemeral by nature, we need to create a ClusterIP Service (named **`api-svc`**) that provides a stable in-cluster IP, selects the **`api-mysql`** Pods via labels, and exposes the API on port `8000` inside the cluster (load-balanced across replicas).
+
+**Goal:** expose the API within the cluster on port 8000 and load-balance across the 3 API Pods.
+
+> #### Service (The Dispatcher / The Stable Internal IP)
+> A Kubernetes **Service** (here: `ClusterIP`) manages the networking of Pods. The Service provides a single, stable in-cluster endpoint (DNS name + virtual IP address) for a set of Pods. It provides a stable in-cluster address and load-balancing across Pods.  
+> Since Pods are "ephemeral" (IPs change as Pods restart/roll), we can't rely on a Pod's IP to connect to it. Instead, the Service selects Pods via labels and forwards traffic to healthy endpoints, effectively load-balancing across replicas. 
+> In our setup, the Ingress routes to the **Service**, and the Service routes to the **Pods** managed by the Deployment.
+
+**Wiring (how it connects to other components):**
+- Selects the Pods created by `my-deployment-eval.yml` (via matching labels).
+- Is used as the backend target in `my-ingress-eval.yml`.
+
+**Key configs that must match:**
+- `spec.selector` must match the Pod label from the Deployment template (otherwise the Service has 0 endpoints).
+- `targetPort: 8000` must match the API container port (uvicorn listens on `8000`).
+- `metadata.name` must match the Ingress backend service name (`backend.service.name`)..
+
+~~~yaml
+# my-service-eval.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-svc                   # Stable in-cluster address for the API Pods
+spec:
+  selector:
+    app: api-mysql                # Select Pods created by the Deployment
+  ports:
+    - name: http
+      port: 8000                  # Service port (clients hit this)
+      targetPort: 8000            # Pod container port (forwarded to api container)
+  type: ClusterIP                 # Internal-only Service (Ingress will expose it externally)
+~~~
+
+---
+
+### 7.4 Create the Ingress (`my-ingress-eval.yml`)
+
+Finally, to allow external access, we create an Ingress named **`api-ingress`** that routes external HTTP requests (path `/`) to the **`api-svc`** Service on port `8000` (via the cluster’s Ingress Controller).
+
+**Goal:** expose the API externally via HTTP routing.
+
+> #### Ingress (The Gatekeeper / The Entrance)
+> A Kubernetes **Ingress** is an object that manages external access to the Services in a cluster.
+> I provides the HTTP entry point for traffic coming from outside the cluster and routes external requests (by host and/or path) to the corresponding Service inside the cluster. So Ingress routes to Services, and Services forward to the Pods behind them.  
+> Ingress requires an Ingress Controller to be installed in the cluster, e.g. NGINX Ingress.
+
+**How it wires to other components:**
+- Routes requests to the Service from `my-service-eval.yml` (`api-svc`) on port  `8000`.
+
+**Key configs that must match / may need adjustment:**
+- `ingressClassName` must match the Ingress Controller available in the cluster (often `nginx`).
+- `backend.service.name` must match `my-service-eval.yml`’s Service name (`api-svc`).
+- `backend.service.port.number` must match the Service port (`8000`).
+
+~~~yaml
+# my-ingress-eval.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress               # Ingress resource name
+spec:
+  ingressClassName: nginx         # Ingress controller to use (adjust if your cluster uses another class)
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-svc     # Route HTTP traffic to the Service
+                port:
+                  number: 8000
+~~~
+
+---
+
+### 7.5 Next: apply and verify
+
+In the next step we will:
+- apply all YAMLs (Secret → Deployment → Service → Ingress)
+- verify Pods/replicas and endpoints (`/status`, `/users`, `/users/{id}`)
+- capture proof outputs for submission

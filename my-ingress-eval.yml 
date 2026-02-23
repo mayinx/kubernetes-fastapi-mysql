@@ -1,0 +1,31 @@
+# -----------------------------------------------------------------------------
+# my-ingress-eval.yml — Kubernetes Ingress (external HTTP entrypoint)
+#
+# Role:
+# - Routes HTTP requests from outside the cluster to the API Service.
+#
+# Wiring (how it relates to other files):
+# - Sends traffic to my-service-eval.yml (api-svc) on port 8000.
+# - Requires an Ingress Controller to be installed in the cluster (often nginx).
+#
+# Key configs that must match / may need adjustment:
+# - ingressClassName MUST match the IngressClass available in your cluster (e.g. nginx).
+# - backend.service.name MUST match the Service metadata.name (api-svc).
+# - backend.service.port.number MUST match the Service port (8000).
+# -----------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress               # Ingress resource name
+spec:
+  ingressClassName: nginx         # Ingress controller to use (adjust if your cluster uses another class)
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-svc     # Route HTTP traffic to the Service
+                port:
+                  number: 8000

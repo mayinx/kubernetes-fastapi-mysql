@@ -1,0 +1,28 @@
+# -----------------------------------------------------------------------------
+# my-service-eval.yml — Kubernetes Service (stable in-cluster endpoint)
+#
+# Role:
+# - Provides a stable DNS name + virtual IP for the API Pods (load-balances across replicas).
+# - Exposes port 8000 inside the cluster (ClusterIP).
+#
+# Wiring (how it relates to other files):
+# - Selects Pods created by my-deployment-eval.yml via label `app: api-mysql`.
+# - Used by my-ingress-eval.yml as the backend target.
+#
+# Key configs that must match:
+# - spec.selector MUST match the Pod labels in the Deployment template.
+# - targetPort MUST match the api containerPort (8000).
+# - Service name MUST match the Ingress backend service.name.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-svc                   # Stable in-cluster address for the API Pods
+spec:
+  selector:
+    app: api-mysql                # Select Pods created by the Deployment
+  ports:
+    - name: http
+      port: 8000                  # Service port (clients hit this)
+      targetPort: 8000            # Pod container port (forwarded to api container)
+  type: ClusterIP                 # Internal-only Service (Ingress will expose it externally)

@@ -1,0 +1,83 @@
+# -----------------------------------------------------------------------------
+# my-deployment-eval.yml — Kubernetes Deployment (the actual workload)
+#
+# Role:
+# - Creates the required Deployment with 3 replicas.
+# - Each Pod contains TWO containers:
+#   1) MySQL (datascientest/mysql-k8s:1.0.0)
+#   2) FastAPI (your Docker Hub image)
+#
+# Wiring (how it relates to other files):
+# - Uses my-secret-eval.yml (Secret) to inject the DB password into BOTH containers.
+# - Exposed by my-service-eval.yml (Service), which selects Pods via label `app: api-mysql`.
+# - my-ingress-eval.yml (Ingress) routes HTTP traffic to the Service.
+#
+# Key configs that must match:
+# - spec.replicas MUST be 3 (exercise requirement).
+# - selector.matchLabels MUST equal template.metadata.labels (otherwise the Deployment breaks).
+# - template.metadata.labels MUST match Service.spec.selector (otherwise Service sees 0 Pods).
+# - api container image MUST be the pushed Docker Hub reference.
+# - api container MUST use MYSQL_HOST=127.0.0.1 because MySQL is in the SAME Pod.
+# - Secret name/key in `secretKeyRef` MUST match my-secret-eval.yml.
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-mysql # Deployment name
+spec:
+  replicas: 3 # Required: 3 Pods (each Pod contains BOTH containers)
+  selector:
+    matchLabels:
+      app: api-mysql # Deployment manages Pods with this label
+  template:
+    metadata:
+      labels:
+        app: api-mysql # Pod label (also used by the Service selector)
+    spec:
+      containers:
+        - name: db
+          image: datascientest/mysql-k8s:1.0.0 # MySQL container image (provided by the exercise)
+          env:
+            # MySQL init expects MYSQL_ROOT_PASSWORD (we source it from the Secret)
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+          ports:
+            - containerPort: 3306 # MySQL listens on 3306 inside the Pod
+
+        - name: api
+          image: mayinx/fastapi-mysql-k8s:1.0.0 # Our pushed FastAPI image (pulled from Docker Hub)
+          env:
+            # Same-Pod networking: the API reaches MySQL via localhost (127.0.0.1) on port 3306
+            - name: MYSQL_HOST
+              value: "127.0.0.1"
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              value: "root"
+            # API reads password from env (Secret), not from code
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_DATABASE
+              value: "Main"
+          ports:
+            - containerPort: 8000 # FastAPI/uvicorn listens on 8000 inside the Pod
+          readinessProbe:
+            # Ready = endpoint responds -> traffic can be routed to this Pod
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            # Live = endpoint responds -> if it fails, K8s restarts the container
+            httpGet:
+              path: /status
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
