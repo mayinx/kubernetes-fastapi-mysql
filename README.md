@@ -54,15 +54,14 @@ Notes:
 - API talks to MySQL via 127.0.0.1:3306 because both containers run in the same Pod.
 ~~~
 
-That one is nicer ;-):
+ 
 
 ![K8s Deployment Architecture](docs/images/k8s-deployment-architecture.png)
 *Figure 1: K8s Deployment Architecture.*
 
-
 ---
 
-## 📁 Project Structure (with 1-line comments)
+## 📁 Project Structure 
 
 ~~~text
 .
@@ -139,7 +138,14 @@ This creates a timestamped folder under `evidence/` containing:
 
 ---
 
-## 🧠 Implementation log (step-by-step)
+## 🧠 Runbook + Implementation log
+
+**Runbook** 
+
+For the TL;DR command checklist and quick setup guide: 
+- [docs/RUNBOOK.md](docs/RUNBOOK.md) 
+
+**Implementation log**
 
 For the detailed build diary, decisions, and commands:
 - [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)
