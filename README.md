@@ -169,7 +169,7 @@ For the detailed build diary, decisions, and commands:
   - 1× MySQL container
   - 1× FastAPI container
 - Create a **Service** and an **Ingress** to enable API access.
-- DB password must be: `datascientest1234`
+- DB password must be: <set-locally>
   - **Must NOT be hard-coded** in `main.py`
   - Must be stored in a **Kubernetes Secret** and injected as env vars.
 

@@ -72,7 +72,7 @@ We create the following initial structure in our repo root, keeping anything api
    - Push the verified image to Docker Hub (`docker push ...`)
 
 7) **Kubernetes manifests (dependency order)**
-   - Create `my-secret-eval.yml` (DB password `datascientest1234`)
+   - Create `my-secret-eval.yml` (DB password <set-locally>)
    - Create `my-deployment-eval.yml`:
      - `replicas: 3`
      - Pod contains **two containers**: MySQL + FastAPI
@@ -260,7 +260,7 @@ Example with redacted secrets:
 
 
 ```bash
-# .env — shared env for local API↔DB integration test (LOCAL ONLY; do not commit)
+# .env.example — shared env for local API↔DB integration test (LOCAL ONLY; do not commit)
 MYSQL_HOST=db
 MYSQL_PORT=3306
 MYSQL_USER=<set-locally>
@@ -527,14 +527,14 @@ First we create a **Secret** named **`mysql-secret`** that stores the DB passwor
 - We use `stringData` for readability; Kubernetes stores the final value base64-encoded under `data`.
 
 ~~~yaml
-# my-secret-eval.yml
+# my-secret-eval.example.yml
 apiVersion: v1
 kind: Secret
 metadata:
   name: mysql-secret                # Secret name referenced by the Deployment
 type: Opaque                        # Generic key/value secret
 stringData:                         # Human-readable input; Kubernetes stores it base64-encoded in `data`
-  MYSQL_PASSWORD: datascientest1234 # DB password (must NOT be hardcoded in main.py)
+  MYSQL_PASSWORD: <set-locally> # DB password (must NOT be hardcoded in main.py)
 ~~~
 
 ---
