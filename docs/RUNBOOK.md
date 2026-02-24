@@ -1,5 +1,4 @@
-# 🧭 Runbook (TL;DR) — kubernetes-fastapi-mysql
-### Kubernetes-first quick reference • Reproducible • Command-focused • Ingress + Secrets + Probes
+# 🧭 Runbook (TL;DR) 
 
 > ## 👤 About
 > This runbook is the **short, command-first** version of the project setup, excecution and verification flow.  
