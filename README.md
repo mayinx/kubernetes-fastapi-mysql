@@ -15,7 +15,7 @@
 ---
 
 ## 🧱 Tech Stack
-☸️ **Kubernetes** (Deployment, Service, Ingress, Secret) | 🐳 **Docker** | 🐍 **FastAPI** | 🧰 **SQLAlchemy** | 🗄️ **MySQL**
+☸️ **Kubernetes** (Deployment, Service, Ingress, Secret) | 🐳 **Docker** | 🐍 **Python** | ⚡ **FastAPI** | 🧰 **SQLAlchemy** | 🌐 **Uvicorn** | 🗄️ **MySQL** | 🔀 **Traefik Ingress** (cluster-specific)
 
 ---
 
@@ -150,6 +150,7 @@ For the TL;DR command checklist and quick setup guide:
 For the detailed build diary, decisions, and commands:
 - [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)
 
+---
 
 ## APPENDIX: Original Evaluation Brief (excerpt)
 
