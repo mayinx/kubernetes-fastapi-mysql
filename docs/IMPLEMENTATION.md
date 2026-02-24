@@ -4,8 +4,8 @@
 
 > ## 👤 About
 > This README contains my personal implementation log ("build diary”).  
-> It was written while building the solution to keep milestones, decisions, and commands reproducible.  
-> For the TL;DR command checklist and quick setup guide, see: **[docs/RUNBOOK.md](RUNBOOK.md)**.
+> It was written while building this solution to keep milestones, decisions, and commands reproducible.  
+> For a "TL;DR command checklist and quick setup guide", see: **[docs/RUNBOOK.md](RUNBOOK.md)**.
 
 ---
 
@@ -33,8 +33,9 @@ We create the following initial structure in our repo root, keeping anything api
 │   ├── Dockerfile
 │   ├── main.py
 │   └── requirements.txt
-├── doc
-│   └── IMPLEMENTATION.md
+├── docs
+│   ├── IMPLEMENTATION.md
+│   └── RUNBOOK.md
 ├── my-deployment-eval.yml
 ├── my-ingress-eval.yml 
 ├── my-secret-eval.yml

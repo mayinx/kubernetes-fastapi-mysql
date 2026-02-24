@@ -71,9 +71,8 @@ Notes:
 │   └── requirements.txt                   # Python dependencies (fastapi, sqlalchemy, mysqlclient, uvicorn)
 ├── compose.yaml                           # Local API↔DB integration test (2 services: api + db) before K8s
 ├── docs/
-│   ├── images/
-│   │   └── k8s-deployment-architecture.png# Architecture diagram used in docs/README
-│   └── IMPLEMENTATION.md                  # Step-by-step build diary + commands + troubleshooting
+│   ├── IMPLEMENTATION.md                  # Step-by-step build diary + commands + troubleshooting   
+│   └── RUNBOOK.md                         # Quick Setup Guide (project setup, excecution + verification flow)
 ├── evidence/                              # Captured proof bundles (one folder per run)
 │   └── 2026-02-23_2108/                   # Example proof run (timestamped)
 │       ├── 00_meta.txt                    # Metadata (timestamp + base URL used for curls)

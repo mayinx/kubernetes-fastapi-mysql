@@ -2,8 +2,8 @@
 ### Kubernetes-first quick reference • Reproducible • Command-focused • Ingress + Secrets + Probes
 
 > ## 👤 About
-> This runbook is the **short, command-first** version of the project setup and verification flow.  
-> It’s meant as a quick reference for reruns (you, graders, future-you) without the long-form diary.  
+> This runbook is the **short, command-first** version of the project setup, excecution and verification flow.  
+> It’s meant as a quick reference for reruns without the long-form diary.  
 > For the full narrative log, see: **[docs/IMPLEMENTATION.md](IMPLEMENTATION.md)**.
 
 ---
@@ -50,7 +50,6 @@ my-deployment-eval.yml
 my-service-eval.yml
 my-ingress-eval.yml
 scripts/capture-proof.sh
-docs/IMPLEMENTATION.md
 ~~~
 
 ---
