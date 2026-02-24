@@ -3,7 +3,7 @@
 # Implementation Steps / Log
 
 > ## 👤 About
-> This README contains my personal implementation log (“exam build diary”).  
+> This README contains my personal implementation log ("build diary”).  
 > It was written while building the solution to keep milestones, decisions, and commands reproducible.  
 > For the TL;DR command checklist and quick setup guide, see: **[docs/RUNBOOK.md](RUNBOOK.md)**.
 
@@ -47,7 +47,7 @@ We create the following initial structure in our repo root, keeping anything api
 ## 2. Implementation roadmap
 
 1) **Repo baseline**
-   - Create the repo structure (`api/` + root YAML files)
+   - Create the repo structure (`api/` + root YAML files + `docs/`)
    - Align Dockerfile paths so `./api` is the build context
 
 2) **Local container proof (API starts)**
@@ -55,39 +55,41 @@ We create the following initial structure in our repo root, keeping anything api
    - Run it locally (`docker run -p 8000:8000 ...`)
    - Prove it responds (`curl http://localhost:8000/status` → `1`)
 
-3) **Capture image evidence (exam-defendable)**
-   - Record: `docker images`, `docker inspect`, `docker history`
-   - Add these commands + key outputs to `docs/IMPLEMENTATION.md`
+3) **Local integration test (API ↔ MySQL via Docker Compose)**
+   - Add env-driven DB config in `api/main.py` (host/port/user/password/database from env vars)
+   - Run a short Compose stack (`compose.yaml`: `api` + `db`) to prove:
+     - DB connectivity works
+     - Credentials work
+     - Schema exists (`Main.Users`)
+   - Fix runtime issues in `main.py` (SQLAlchemy 2.0 raw SQL + FastAPI path syntax)
 
-4) **Kubernetes readiness: fix API DB wiring**
-   - Update `api/main.py` so it:
-     - connects to MySQL in the same Pod (`127.0.0.1` / `localhost`)
-     - reads DB password from an env var (fed later via Kubernetes Secret)
-
-5) **Local re-proof after code change**
-   - Rebuild + rerun locally
-   - Re-test `/status` (still `1`)
-
-6) **Publish image for Kubernetes**
+4) **Publish image for Kubernetes**
+   - Rebuild the API image (post-fixes)
    - Push the verified image to Docker Hub (`docker push ...`)
 
-7) **Kubernetes manifests (dependency order)**
-   - Create `my-secret-eval.yml` (DB password <set-locally>)
+5) **Create Kubernetes manifests (dependency order)**
+   - Create `my-secret-eval.yml`
    - Create `my-deployment-eval.yml`:
      - `replicas: 3`
      - Pod contains **two containers**: MySQL + FastAPI
-     - FastAPI env var comes from the Secret
-     - add minimal readiness/liveness probes for the API
+     - API reads password from Secret env var
+     - minimal readiness/liveness probes (`/status`)
    - Create `my-service-eval.yml` (ClusterIP exposing API on port 8000)
-   - Create `my-ingress-eval.yml` (HTTP routing to the Service)
+   - Create `my-ingress-eval.yml`
+     - Check ingress class first (`kubectl get ingressclass`)
+     - set `ingressClassName` accordingly (in our cluster: `traefik`)
 
-8) **Apply + verify in cluster**
+6) **Apply + verify in cluster**
    - Apply in order: Secret → Deployment → Service → Ingress
    - Verify rollout + endpoints:
-     - `/status`
-     - `/users`
-     - `/users/{id}`
-   - Capture proof commands + outputs in `docs/IMPLEMENTATION.md` for submission
+     - Pods Ready `2/2` (two containers per Pod)
+     - Request `/status`, `/users`, `/users/{id}` via Ingress (or port-forward fallback)
+
+7) **Capture proof (evidence bundle)**
+   - Use custom `scripts/capture-proof.sh` to snapshot:
+     - Pods, Service, EndpointSlice, Ingress
+     - curl outputs for `/status`, `/users`, `/users/1`
+   - Store results under `evidence/<timestamp>/`
 
 ---
 
