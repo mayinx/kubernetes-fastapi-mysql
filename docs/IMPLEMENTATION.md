@@ -258,9 +258,11 @@ To support both setups (Compose now, Kubernetes later), we keep connection setti
 
 Example with redacted secrets:
 
+> For public repo hygiene, `.env` is ignored; use `.env.example.yml` as template.
+
 
 ```bash
-# .env.example — shared env for local API↔DB integration test (LOCAL ONLY; do not commit)
+# .env.example — shared redacxted env for local API↔DB integration test (safe to commit)
 MYSQL_HOST=db
 MYSQL_PORT=3306
 MYSQL_USER=<set-locally>
@@ -268,7 +270,7 @@ MYSQL_PASSWORD=<set-locally>
 MYSQL_DATABASE=Main
 ```
 
-> **Important:** Do NOT commit `.env` (with real local values). Add `.env` to `.gitignore`.
+> **Important:** Do NOT commit `.env` (with real local values). Add `.env` to `.gitignore`. 
 
 Reasoning: Keeping local configuration in an `.env` file allows us to: 
 - Run the same app locally (Compose) and later in Kubernetes (via env vars / Secrets),
@@ -525,6 +527,8 @@ First we create a **Secret** named **`mysql-secret`** that stores the DB passwor
 - `metadata.name` must match `secretKeyRef.name` in the Deployment.
 - the Secret key (e.g. `MYSQL_PASSWORD`) matches what the API expects via environment variables - and must match `secretKeyRef.key` in the Deployment.
 - We use `stringData` for readability; Kubernetes stores the final value base64-encoded under `data`.
+
+> For public repo hygiene, `my-secret-eval.yml` is ignored; use `my-secret-eval.example.yml` as template.
 
 ~~~yaml
 # my-secret-eval.example.yml
